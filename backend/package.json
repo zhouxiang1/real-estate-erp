@@ -1,0 +1,57 @@
+{
+  "name": "real-estate-erp-backend",
+  "version": "1.0.0",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "start:dev": "nodemon --exec ts-node src/main.ts",
+    "start:debug": "nodemon --exec ts-node --inspect src/main.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "prisma:seed": "ts-node src/prisma/seed.ts"
+  },
+  "prisma": {
+    "seed": "ts-node src/prisma/seed.ts"
+  },
+  "keywords": [
+    "nest",
+    "erp",
+    "real-estate"
+  ],
+  "author": "",
+  "license": "MIT",
+  "description": "Real Estate ERP System - Backend API",
+  "dependencies": {
+    "@nestjs/common": "^10.4.22",
+    "@nestjs/config": "^4.0.3",
+    "@nestjs/core": "^10.4.22",
+    "@nestjs/jwt": "^11.0.2",
+    "@nestjs/passport": "^11.0.5",
+    "@nestjs/platform-express": "^10.4.22",
+    "@prisma/client": "^5.22.0",
+    "bcrypt": "^6.0.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.3",
+    "dayjs": "^1.11.20",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1",
+    "passport-local": "^1.0.0",
+    "prisma": "^5.22.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.2.2",
+    "@types/passport-jwt": "^4.0.1",
+    "@types/passport-local": "^1.0.38",
+    "@types/xlsx": "^0.0.35",
+    "nodemon": "^3.1.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

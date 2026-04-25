@@ -1,0 +1,672 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== 基础系统 ====================
+
+// 用户表
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  password     String
+  name         String
+  email        String?
+  phone        String?
+  avatar       String?
+  status       Int      @default(1) // 1:启用 0:禁用
+  role         Role     @relation(fields: [roleId], references: [id])
+  roleId       String
+  department   Department? @relation(fields: [departmentId], references: [id])
+  departmentId String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // 关联
+  operationLogs      OperationLog[]
+  salesContracts     SalesContract[]
+  transactions       Transaction[]
+  customerFollowups  CustomerFollowup[]
+  commissions        Commission[]
+  commissionAudits   CommissionAudit[]
+  customerBelongs    CustomerBelong[]
+  approvalRequests   ApprovalRequest[] @relation("ApprovalRequester")
+  approvalRecords    ApprovalRecord[]  @relation("ApprovalApprover")
+  approvalNodes      ApprovalNode[]    @relation("ApprovalNodeUser")
+}
+
+// 角色表
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  code        String   @unique // admin, sales_manager, sales_consultant, channel_manager, risk_controller, distributor
+  description String?
+  permissions String   // 权限列表，存JSON字符串
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // 关联
+  users User[]
+}
+
+// 组织架构
+model Department {
+  id        String   @id @default(uuid())
+  name      String
+  parentId  String?
+  parent    Department? @relation("DepartmentHierarchy", fields: [parentId], references: [id])
+  children  Department[] @relation("DepartmentHierarchy")
+  sort      Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 关联
+  users User[]
+}
+
+// 操作日志
+model OperationLog {
+  id         String   @id @default(uuid())
+  user       User     @relation(fields: [userId], references: [id])
+  userId     String
+  module     String   // 模块名称
+  action     String   // 操作类型
+  method     String   // 请求方法
+  path       String   // 请求路径
+  params     String?  // 请求参数，存JSON字符串
+  ip         String?  // IP地址
+  status     Int      @default(1) // 1:成功 0:失败
+  message    String?  // 消息
+  createdAt  DateTime @default(now())
+}
+
+// ==================== 审批流 ====================
+
+// 审批流程模板
+model ApprovalWorkflow {
+  id          String   @id @default(uuid())
+  key         String   @unique // 如 finance.price_change
+  name        String
+  module      String
+  action      String
+  description String?
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  nodes    ApprovalNode[]
+  requests ApprovalRequest[]
+}
+
+// 审批节点
+model ApprovalNode {
+  id              String   @id @default(uuid())
+  workflow        ApprovalWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflowId      String
+  name            String
+  sort            Int      @default(1)
+  approverType    String   @default("role") // role/user
+  approverRoleCode String?
+  approverUser    User?    @relation("ApprovalNodeUser", fields: [approverUserId], references: [id])
+  approverUserId  String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([workflowId, sort])
+}
+
+// 审批单
+model ApprovalRequest {
+  id            String   @id @default(uuid())
+  workflow      ApprovalWorkflow @relation(fields: [workflowId], references: [id])
+  workflowId    String
+  workflowKey   String
+  title         String
+  module        String
+  action        String
+  businessType  String?
+  businessId    String?
+  payload       String   // JSON: 待审批通过后执行的参数
+  summary       String?  // JSON: 前端展示摘要
+  requester     User     @relation("ApprovalRequester", fields: [requesterId], references: [id])
+  requesterId   String
+  requesterRoleCode String?
+  currentNodeId String?
+  currentStep   Int      @default(1)
+  status        Int      @default(0) // 0:审批中 1:已通过并执行 2:已拒绝 3:执行失败
+  resultMessage String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  records ApprovalRecord[]
+
+  @@index([workflowKey, status])
+  @@index([requesterId, status])
+}
+
+// 审批记录
+model ApprovalRecord {
+  id          String   @id @default(uuid())
+  request     ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  requestId   String
+  nodeId      String?
+  nodeName    String?
+  approver    User?    @relation("ApprovalApprover", fields: [approverId], references: [id])
+  approverId  String?
+  action      String   // approve/reject
+  comment     String?
+  createdAt   DateTime @default(now())
+
+  @@index([requestId])
+}
+
+// ==================== 项目管理 ====================
+
+// 项目表
+model Project {
+  id              String    @id @default(uuid())
+  name            String
+  code            String    @unique
+  address         String
+  landArea        Float?    // 土地面积
+  buildArea       Float?    // 建筑面积
+  totalInvestment Float?    // 总投资
+  startDate       DateTime? // 开工日期
+  endDate         DateTime? // 竣工日期
+  status          Int       @default(0) // 0:立项 1:规划 2:施工 3:竣工
+  description     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // 关联
+  progresses     ProjectProgress[]
+  purchaseOrders PurchaseOrder[]
+  documents      ProjectDocument[]
+}
+
+// 项目进度
+model ProjectProgress {
+  id          String   @id @default(uuid())
+  project     Project  @relation(fields: [projectId], references: [id])
+  projectId   String
+  phase       String   // 阶段名称
+  progress    Int      // 进度百分比
+  status      String   // 状态
+  planDate    DateTime?
+  actualDate  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// 项目文档
+model ProjectDocument {
+  id        String   @id @default(uuid())
+  project   Project  @relation(fields: [projectId], references: [id])
+  projectId String
+  name      String
+  path      String
+  size      Int
+  type      String
+  uploadedBy String?
+  createdAt DateTime @default(now())
+}
+
+// ==================== 销售CRM ====================
+
+// 楼盘
+model BuildingComplex {
+  id         String     @id @default(uuid())
+  name       String
+  address    String
+  developer  String   // 开发商
+  totalBuild Int      // 总栋数
+  totalUnits Int      // 总户数
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // 关联
+  buildings Building[]
+}
+
+// 楼栋
+model Building {
+  id            String          @id @default(uuid())
+  complex       BuildingComplex @relation(fields: [complexId], references: [id])
+  complexId     String
+  name          String   // 楼栋号
+  floors        Int      // 楼层数
+  units         Int      @default(1) // 单元数
+  unitsPerFloor Int      // 每层户数
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // 关联
+  rooms Room[]
+}
+
+// 房源
+model Room {
+  id        String   @id @default(uuid())
+  building  Building @relation(fields: [buildingId], references: [id])
+  buildingId String
+  unit      String   // 房号
+  floor     Int      // 楼层
+  area      Float    // 面积（默认等于预测面积）
+  price     Float    // 单价
+  totalPrice Float   // 总价
+  roomType  String   // 户型（如：3室2厅）
+  status    Int      @default(0) // 0:待售 1:已售 2:预留 3:认购 4:已签
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 面积口径
+  predictArea  Float?   // 预测面积
+  actualArea   Float?   // 实测面积
+
+  // 认购/成交客户信息
+  customerId     String?  // 认购/成交的客户ID
+  customerName   String?  // 认购/成交的客户姓名
+  consultantId   String?  // 认购/成交的顾问ID
+  consultantName String?  // 认购/成交的顾问姓名
+  subscribeDate  DateTime? // 认购日期
+
+  // 关联
+  contracts    SalesContract[]
+  transactions  Transaction[]
+}
+
+// 客户
+model Customer {
+  id        String   @id @default(uuid())
+  name      String
+  phone     String
+  email     String?
+  wechat    String?
+  idCard    String?  // 身份证号
+  address   String?  // 通讯地址
+  source    String?  // 来源（渠道）
+  level     String?  // 客户等级
+  status    Int      @default(0) // 0:潜在 1:意向 2:成交
+  remark    String?
+  isPublic  Boolean  @default(false) // 是否在公共池
+  lastFollowupAt DateTime? // 最后跟进时间
+
+  // 扩展字段
+  ageGroup      String?  // 年龄段
+  livingArea    String?  // 居住区域(JSON数组)
+  workArea      String?  // 工作区域(JSON数组)
+  industry      String?  // 所属行业
+  maritalStatus String?  // 婚姻状况
+  occupation    String?  // 职业
+  loanType      String?  // 贷款方式
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 关联
+  contracts            SalesContract[]
+  followups            CustomerFollowup[]
+  transactions         Transaction[]
+  recommendedCustomers RecommendedCustomer[]
+  customerBelongs      CustomerBelong[]
+}
+
+// 销售合同
+model SalesContract {
+  id         String   @id @default(uuid())
+  contractNo String   @unique
+  customer   Customer @relation(fields: [customerId], references: [id])
+  customerId String
+  room       Room     @relation(fields: [roomId], references: [id])
+  roomId     String
+  salesPerson User    @relation(fields: [salesPersonId], references: [id])
+  salesPersonId String
+  totalPrice Float
+  paidAmount Float    @default(0)
+  signDate   DateTime
+  status     Int      @default(0) // 0:待付款 1:已付清 2:已取消
+  remark     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // 关联
+  incomes Income[]
+}
+
+// ==================== 采购管理 ====================
+
+// 供应商
+model Supplier {
+  id          String   @id @default(uuid())
+  name        String
+  code        String   @unique
+  contact     String
+  phone       String
+  address     String?
+  bankAccount String?
+  bankName    String?
+  status      Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // 关联
+  purchaseOrders PurchaseOrder[]
+}
+
+// 采购订单
+model PurchaseOrder {
+  id          String   @id @default(uuid())
+  orderNo     String   @unique
+  supplier    Supplier @relation(fields: [supplierId], references: [id])
+  supplierId  String
+  project     Project? @relation(fields: [projectId], references: [id])
+  projectId   String?
+  totalAmount Float
+  status      Int      @default(0) // 0:待审批 1:已批准 2:采购中 3:已完成
+  orderDate   DateTime @default(now())
+  remark      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // 关联
+  expenses Expense[]
+}
+
+// ==================== 财务管理 ====================
+
+// 收款记录
+model Income {
+  id            String         @id @default(uuid())
+  contract      SalesContract  @relation(fields: [contractId], references: [id])
+  contractId    String
+  amount        Float
+  paymentDate   DateTime
+  paymentMethod String // 转账/现金/支票等
+  status        Int           @default(1)
+  remark        String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+}
+
+// 付款记录
+model Expense {
+  id         String         @id @default(uuid())
+  order      PurchaseOrder  @relation(fields: [orderId], references: [id])
+  orderId    String
+  amount     Float
+  paymentDate DateTime
+  category   String   // 费用类别
+  status     Int      @default(1)
+  remark     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ==================== 客户跟进 ====================
+
+// 客户跟进记录
+model CustomerFollowup {
+  id         String   @id @default(uuid())
+  customer   Customer @relation(fields: [customerId], references: [id])
+  customerId String
+  user       User     @relation(fields: [userId], references: [id])
+  userId     String
+  type       String   // 跟进类型: call-电话, visit-上门, wechat-微信, other-其他
+  content    String   // 跟进内容
+  nextPlan   String?  // 下一步计划
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ==================== 渠道与分销 ====================
+
+// 渠道合作伙伴
+model ChannelPartner {
+  id          String   @id @default(uuid())
+  name        String
+  code        String   @unique
+  type        String   // 渠道类型: agency-代理公司, individual-个人, platform-平台
+  contact     String
+  phone       String
+  commission  Float    @default(0.02) // 佣金比例 默认2%
+  status      Int      @default(1) // 1:启用 0:禁用
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // 关联
+  commissions      Commission[]
+  transactions     Transaction[]
+  customerBelongs  CustomerBelong[]
+}
+
+// 分销经纪人
+model Distributor {
+  id          String   @id @default(uuid())
+  username    String   @unique
+  password    String
+  name        String
+  phone       String   @unique
+  idCard      String?  // 身份证号
+  avatar      String?
+  status      Int      @default(1) // 1:正常 0:禁用
+  parentId    String?  // 上级经纪人ID
+  parent      Distributor? @relation("DistributorTeam", fields: [parentId], references: [id])
+  children    Distributor[] @relation("DistributorTeam")
+  bankName    String?  // 银行名称
+  bankAccount String?  // 银行卡号
+  realName    String?  // 实名认证姓名
+  isVerified  Boolean  @default(false) // 是否实名认证
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // 关联
+  commissions           Commission[]
+  recommendedCustomers  RecommendedCustomer[]
+  withdrawals           Withdrawal[]
+  transactions          Transaction[]
+  customerBelongs       CustomerBelong[]
+}
+
+// 推荐客户
+model RecommendedCustomer {
+  id            String   @id @default(uuid())
+  distributor   Distributor @relation(fields: [distributorId], references: [id])
+  distributorId String
+  customer      Customer @relation(fields: [customerId], references: [id])
+  customerId    String
+  status        Int      @default(0) // 0:待确认 1:已确认 2:已成交 3:已失效
+  remark        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// 权益人/联名人
+model Beneficiary {
+  id            String   @id @default(uuid())
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transactionId String
+  name          String   // 权益人姓名
+  idCard        String?  // 身份证号
+  phone         String?  // 联系电话
+  relation      String?  // 与主客户关系（配偶/父母/子女/其他）
+  shareRatio    Float?   // 产权比例
+  isPrimary     Boolean  @default(false) // 是否为主权益人
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// 成交记录
+model Transaction {
+  id            String   @id @default(uuid())
+  contractNo    String   @unique
+  customer      Customer @relation(fields: [customerId], references: [id])
+  customerId    String
+  room          Room     @relation(fields: [roomId], references: [id])
+  roomId       String
+  salesPerson   User     @relation(fields: [salesPersonId], references: [id])
+  salesPersonId String
+  channelPartner ChannelPartner? @relation(fields: [channelPartnerId], references: [id])
+  channelPartnerId String?
+  distributor   Distributor? @relation(fields: [distributorId], references: [id])
+  distributorId String?
+  originalPrice Float?   // 原价
+  discountType  String?  // 折扣类型: none, amount(总价减), rate(折扣率), unit(单价减)
+  discountValue Float?   // 折扣值
+  totalPrice    Float
+  paidAmount    Float    @default(0)
+  signDate      DateTime
+  // 0:待付款 1:已付清 2:已取消 3:退房 4:挞定
+  status        Int      @default(0)
+  remark        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // 签约日期
+  draftSignDate   DateTime? // 草签日期
+  onlineSignDate DateTime? // 网签日期
+
+  // 面积相关
+  predictArea    Float?    // 预测面积
+  actualArea     Float?    // 实测面积
+  areaDiff       Float?    // 面积差（实测-预测）
+  areaDiffAmount Float?    // 面积差金额（单价*面积差）
+
+  // 业务类型: normal(普通), change_room(换房), modify(改签), refund(退房), forfeit(挞定)
+  type                  String?   @default("normal")
+  originalTransactionId String?  // 换房时原成交ID
+  refundAmount         Float?    // 退房/挞定时退还金额
+  forfeitAmount        Float?    // 挞定没收金额
+  reason               String?   // 退房/挞定原因
+  operateDate          DateTime? // 实际操作日期
+
+  // 更名相关
+  originalCustomerName String?   // 更名前的客户姓名
+  renameDate          DateTime? // 更名日期
+  renameReason        String?   // 更名原因
+
+  // 关联
+  commissions   Commission[]
+  beneficiaries Beneficiary[]   // 权益人列表
+  paymentRecords PaymentRecord[] // 付款记录
+  priceChangeRecords PriceChangeRecord[] // 价格变更记录
+}
+
+// 付款记录
+model PaymentRecord {
+  id            String   @id @default(uuid())
+  transaction    Transaction @relation(fields: [transactionId], references: [id])
+  transactionId  String
+  // 付款类型: deposit-定金, down_payment-首付, mortgage-按揭, final_payment-尾款, other-其他
+  type          String
+  amount        Float    // 付款金额
+  paymentDate   DateTime // 付款日期
+  paymentMethod String?  // 付款方式: bank_transfer-银行转账, cash-现金, check-支票, wechat-微信, alipay-支付宝
+  // 收款账户信息
+  bankAccount   String?  // 收款账号
+  bankName      String?  // 开户行
+  // 状态: 0-待确认, 1-已确认, 2-已退款
+  status        Int     @default(1)
+  remark        String?
+  operator      String?  // 经办人
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// 价格变更记录
+model PriceChangeRecord {
+  id            String   @id @default(uuid())
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+  transactionId String
+  // 变更类型: discount-折扣变更, area_diff-面积差变更, price_adjust-价格调整
+  changeType    String
+  // 变更前
+  oldPrice     Float
+  oldTotalPrice Float
+  // 变更后
+  newPrice     Float
+  newTotalPrice Float
+  // 差额
+  diffAmount   Float   // 差额（正值表示补款，负值表示退款）
+  reason       String? // 变更原因
+  operator     String? // 经办人
+  createdAt    DateTime @default(now())
+}
+
+// 佣金记录
+model Commission {
+  id            String   @id @default(uuid())
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+  transactionId String
+  user          User?     @relation(fields: [userId], references: [id])
+  userId        String?   // 置业顾问ID
+  channelPartner ChannelPartner? @relation(fields: [channelPartnerId], references: [id])
+  channelPartnerId String?
+  distributor   Distributor? @relation(fields: [distributorId], references: [id])
+  distributorId String?
+  amount        Float    // 佣金金额
+  rate          Float    // 佣金比例
+  type          String   // 佣金类型: sales-销售佣金, channel-渠道佣金, distributor-分销佣金
+  status        Int      @default(0) // 0:待审核 1:待发放 2:已发放 3:已拒绝
+  remark        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // 关联
+  audits        CommissionAudit[]
+}
+
+// 佣金审核记录
+model CommissionAudit {
+  id          String   @id @default(uuid())
+  commission  Commission @relation(fields: [commissionId], references: [id])
+  commissionId String
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+  action      String   // approve-通过, reject-拒绝
+  comment     String?
+  createdAt   DateTime @default(now())
+}
+
+// 提现记录
+model Withdrawal {
+  id           String   @id @default(uuid())
+  distributor  Distributor @relation(fields: [distributorId], references: [id])
+  distributorId String
+  amount       Float
+  fee          Float    @default(0) // 手续费
+  actualAmount Float    // 实际到账金额
+  bankName     String
+  bankAccount  String
+  status       Int      @default(0) // 0:待审核 1:审核通过 2:已打款 3:已拒绝
+  remark       String?
+  auditBy      String?  // 审核人
+  auditTime    DateTime?
+  paidTime     DateTime? // 打款时间
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// 客户归属（用于区分客户是哪个顾问/渠道/分销的）
+model CustomerBelong {
+  id            String   @id @default(uuid())
+  customer      Customer @relation(fields: [customerId], references: [id])
+  customerId    String
+  user          User?     @relation(fields: [userId], references: [id])
+  userId        String?   // 置业顾问ID
+  channelPartner ChannelPartner? @relation(fields: [channelPartnerId], references: [id])
+  channelPartnerId String?
+  distributor   Distributor? @relation(fields: [distributorId], references: [id])
+  distributorId String?
+  type          String   // sales-销售, channel-渠道, distributor-分销
+  createdAt     DateTime @default(now())
+}

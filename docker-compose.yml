@@ -1,0 +1,67 @@
+name: real-estate-erp
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: real-estate-erp-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-real_estate_erp_password}
+      POSTGRES_DB: real_estate_erp
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - erp-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: real-estate-erp-redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - erp-network
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: real-estate-erp-backend
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-real_estate_erp_password}@postgres:5432/real_estate_erp?schema=public"
+      JWT_SECRET: ${JWT_SECRET:-real-estate-erp-change-me}
+      JWT_EXPIRES_IN: 7d
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - erp-network
+    volumes:
+      - ./backend/uploads:/app/uploads
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: real-estate-erp-frontend
+    ports:
+      - "${FRONTEND_PORT:-18080}:80"
+    depends_on:
+      - backend
+    networks:
+      - erp-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  erp-network:
+    driver: bridge
