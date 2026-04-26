@@ -90,7 +90,7 @@ export class ChannelController {
   // ==================== 异常交易监控 ====================
 
   @Get('anomalies')
-  @Roles('admin', 'sales_manager', 'risk_controller')
+  @Roles('admin', 'sales_manager', 'channel_manager', 'risk_controller')
   getAnomalies(
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
