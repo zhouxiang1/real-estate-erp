@@ -15,79 +15,62 @@ export class ManagerReportService {
       },
     };
 
-    // 获取成交数据
-    const transactions = await this.prisma.transaction.findMany({
-      where: {
-        ...where,
-        status: { not: 2 }, // 排除已取消
+    const customerCreatedAt = {
+      createdAt: {
+        gte: startDate,
+        lte: endDate,
       },
-      include: {
-        room: {
-          include: {
-            building: {
-              include: {
-                complex: true,
-              },
-            },
+    };
+
+    const [transactionStats, newCustomers, customersWithDeal, subscribeCount] = await Promise.all([
+      this.prisma.transaction.aggregate({
+        where: {
+          ...where,
+          status: { not: 2 }, // 排除已取消
+        },
+        _count: { _all: true },
+        _sum: { totalPrice: true, paidAmount: true },
+      }),
+      this.prisma.customer.findMany({
+        where: customerCreatedAt,
+        select: { id: true },
+      }),
+      this.prisma.transaction.findMany({
+        where: {
+          signDate: {
+            gte: startDate,
+            lte: endDate,
+          },
+          status: { in: [3, 4] }, // 认购和成交
+        },
+        select: {
+          customerId: true,
+        },
+      }),
+      this.prisma.transaction.count({
+        where: {
+          status: 3, // 认购
+          signDate: {
+            gte: startDate,
+            lte: endDate,
           },
         },
-        salesPerson: true,
-        customer: true,
-      },
-    });
-
-    // 获取时间内创建的新客户
-    const newCustomers = await this.prisma.customer.findMany({
-      where: {
-        createdAt: {
-          gte: startDate,
-          lte: endDate,
-        },
-      },
-    });
+      }),
+    ]);
 
     // 区分新客和老客（新客户是首次到访的，老客户是有过成交记录的）
     // 新客户ID列表（时间段内创建的客户的ID）
     const newCustomerIds = new Set(newCustomers.map(c => c.id));
 
-    // 在时间段内有成交的客户
-    const customersWithDeal = await this.prisma.transaction.findMany({
-      where: {
-        signDate: {
-          gte: startDate,
-          lte: endDate,
-        },
-        status: { in: [3, 4] }, // 认购和成交
-      },
-      select: {
-        customerId: true,
-      },
-    });
-
     // 区分新客成交和老客成交
     const newCustomerDealCount = customersWithDeal.filter(c => newCustomerIds.has(c.customerId)).length;
     const oldCustomerDealCount = customersWithDeal.length - newCustomerDealCount;
 
-    // 计算成交额
-    const totalAmount = transactions.reduce((sum, tx) => sum + tx.totalPrice, 0);
-    const paidAmount = transactions.reduce((sum, tx) => sum + tx.paidAmount, 0);
-
-    // 获取认购数据
-    const subscribedTransactions = await this.prisma.transaction.findMany({
-      where: {
-        status: 3, // 认购
-        signDate: {
-          gte: startDate,
-          lte: endDate,
-        },
-      },
-    });
-
     return {
-      transactionCount: transactions.length,
-      subscribeCount: subscribedTransactions.length,
-      totalAmount,
-      paidAmount,
+      transactionCount: transactionStats._count._all,
+      subscribeCount,
+      totalAmount: transactionStats._sum.totalPrice || 0,
+      paidAmount: transactionStats._sum.paidAmount || 0,
       customerCount: newCustomers.length,
       newCustomerCount: newCustomers.length,
       oldCustomerCount: 0, // 老客户数通过排除法计算
@@ -103,32 +86,28 @@ export class ManagerReportService {
     // 今日
     const todayStart = now.startOf('day').toDate();
     const todayEnd = now.endOf('day').toDate();
-    const today = await this.getStatsInRange(todayStart, todayEnd);
-
-    // 本周
     const weekStart = now.startOf('week').toDate();
     const weekEnd = now.endOf('day').toDate();
-    const week = await this.getStatsInRange(weekStart, weekEnd);
 
-    // 本月
     const monthStart = now.startOf('month').toDate();
     const monthEnd = now.endOf('day').toDate();
-    const month = await this.getStatsInRange(monthStart, monthEnd);
 
-    // 本季
     const quarterStart = (now as any).startOf('quarter').toDate();
     const quarterEnd = now.endOf('day').toDate();
-    const quarter = await this.getStatsInRange(quarterStart, quarterEnd);
 
-    // 本年
     const yearStart = now.startOf('year').toDate();
     const yearEnd = now.endOf('day').toDate();
-    const year = await this.getStatsInRange(yearStart, yearEnd);
 
-    // 累计（所有时间）
     const allStart = new Date('2020-01-01');
     const allEnd = now.endOf('day').toDate();
-    const allTime = await this.getStatsInRange(allStart, allEnd);
+    const [today, week, month, quarter, year, allTime] = await Promise.all([
+      this.getStatsInRange(todayStart, todayEnd),
+      this.getStatsInRange(weekStart, weekEnd),
+      this.getStatsInRange(monthStart, monthEnd),
+      this.getStatsInRange(quarterStart, quarterEnd),
+      this.getStatsInRange(yearStart, yearEnd),
+      this.getStatsInRange(allStart, allEnd),
+    ]);
 
     return {
       today,

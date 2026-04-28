@@ -1,7 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, Row, Col, Select, Tag, Modal, Descriptions, message, Empty, Statistic, Button, Space, Form, Input, InputNumber } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { projectApi } from '../../services/api';
+import {
+  calculateRoomStats,
+  EMPTY_ROOM_STATS,
+  groupRoomsByFloor,
+  ROOM_STATUS_COLORS,
+  ROOM_STATUS_META,
+  ROOM_STATUS_TEXT_COLORS,
+} from '../../utils/roomStats';
 
 const OfficeRooms = () => {
   const [complexes, setComplexes] = useState<any[]>([]);
@@ -9,12 +17,52 @@ const OfficeRooms = () => {
   const [selectedComplex, setSelectedComplex] = useState<string>('');
   const [selectedBuilding, setSelectedBuilding] = useState<string>('');
   const [rooms, setRooms] = useState<any[]>([]);
-  const [buildingStats, setBuildingStats] = useState<any>({});
+  const [buildingStats, setBuildingStats] = useState(EMPTY_ROOM_STATS);
   const [roomModalVisible, setRoomModalVisible] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<any>(null);
   const [batchModalVisible, setBatchModalVisible] = useState(false);
   const [batchForm] = Form.useForm();
+  const roomsByFloor = useMemo(() => groupRoomsByFloor(rooms), [rooms]);
 
+
+  async function loadComplexes() {
+    try {
+      const res = await projectApi.listComplex({ limit: 100 });
+      setComplexes(res.data.data || []);
+      if (res.data.data?.length > 0) {
+        setSelectedComplex(res.data.data[0].id);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  async function loadBuildings(complexId: string) {
+    try {
+      const res = await projectApi.listBuildings(complexId);
+      setBuildings(res.data || []);
+      if (res.data?.length > 0) {
+        setSelectedBuilding(res.data[0].id);
+      } else {
+        setSelectedBuilding('');
+        setRooms([]);
+        setBuildingStats(EMPTY_ROOM_STATS);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  async function loadRooms(buildingId: string) {
+    try {
+      const res = await projectApi.listRooms({ buildingId, limit: 500 });
+      const roomList = res.data.data || [];
+      setRooms(roomList);
+      setBuildingStats(calculateRoomStats(roomList));
+    } catch (error) {
+      console.error(error);
+    }
+  }
   useEffect(() => {
     loadComplexes();
   }, []);
@@ -28,72 +76,8 @@ const OfficeRooms = () => {
   useEffect(() => {
     if (selectedBuilding) {
       loadRooms(selectedBuilding);
-      loadBuildingStats(selectedBuilding);
     }
   }, [selectedBuilding]);
-
-  const loadComplexes = async () => {
-    try {
-      const res = await projectApi.listComplex({ limit: 100 });
-      setComplexes(res.data.data || []);
-      if (res.data.data?.length > 0) {
-        setSelectedComplex(res.data.data[0].id);
-      }
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
-  const loadBuildings = async (complexId: string) => {
-    try {
-      const res = await projectApi.listBuildings(complexId);
-      setBuildings(res.data || []);
-      if (res.data?.length > 0) {
-        setSelectedBuilding(res.data[0].id);
-      } else {
-        setSelectedBuilding('');
-        setRooms([]);
-      }
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
-  const loadRooms = async (buildingId: string) => {
-    try {
-      const res = await projectApi.listRooms({ buildingId, limit: 500 });
-      setRooms(res.data.data || []);
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
-  const loadBuildingStats = async (buildingId: string) => {
-    try {
-      const res = await projectApi.listRooms({ buildingId, limit: 500 });
-      const roomList = res.data.data || [];
-
-      const total = roomList.length;
-      const sold = roomList.filter((r: any) => r.status === 1).length;
-      const reserved = roomList.filter((r: any) => r.status === 2).length;
-      const available = roomList.filter((r: any) => r.status === 0).length;
-
-      // 计算面积区间
-      const areas = roomList.map((r: any) => r.area).filter(Boolean);
-      const minArea = areas.length > 0 ? Math.min(...areas) : 0;
-      const maxArea = areas.length > 0 ? Math.max(...areas) : 0;
-
-      setBuildingStats({
-        total,
-        sold,
-        reserved,
-        available,
-        areaRange: minArea && maxArea ? `${minArea.toFixed(1)}-${maxArea.toFixed(1)}` : '-',
-      });
-    } catch (error) {
-      console.error(error);
-    }
-  };
 
   const handleRoomClick = (room: any) => {
     setSelectedRoom(room);
@@ -126,35 +110,9 @@ const OfficeRooms = () => {
       setBatchModalVisible(false);
       batchForm.resetFields();
       loadRooms(selectedBuilding);
-      loadBuildingStats(selectedBuilding);
-    } catch (error) {
+    } catch {
       message.error('批量创建失败');
     }
-  };
-
-  // 状态颜色映射
-  const statusColors: Record<number, string> = {
-    0: '#ffffff',
-    1: '#ff4d4f',
-    2: '#faad14',
-    3: '#52c41a',
-    4: '#1890ff',
-  };
-
-  const statusTextColors: Record<number, string> = {
-    0: '#000000',
-    1: '#ffffff',
-    2: '#000000',
-    3: '#ffffff',
-    4: '#ffffff',
-  };
-
-  const statusMap: Record<number, { color: string; text: string }> = {
-    0: { color: '#ffffff', text: '待售' },
-    1: { color: '#ff4d4f', text: '已售' },
-    2: { color: '#faad14', text: '预留' },
-    3: { color: '#52c41a', text: '认购' },
-    4: { color: '#1890ff', text: '已签' },
   };
 
   const currentBuilding = buildings.find(b => b.id === selectedBuilding);
@@ -165,13 +123,9 @@ const OfficeRooms = () => {
       return <Empty description="暂无房源数据" />;
     }
 
-    // 按楼层分组，每层一个row
-    const floors = [...new Set(rooms.map(r => r.floor))].sort((a, b) => b - a);
-
     return (
       <div style={{ maxHeight: '60vh', overflow: 'auto' }}>
-        {floors.map(floor => {
-          const floorRooms = rooms.filter(r => r.floor === floor);
+        {roomsByFloor.map(({ floor, rooms: floorRooms }) => {
           return (
             <div key={floor} style={{ marginBottom: 8 }}>
               <div style={{ fontWeight: 'bold', marginBottom: 4, color: '#666' }}>{floor}层</div>
@@ -183,7 +137,7 @@ const OfficeRooms = () => {
                     style={{
                       width: 70,
                       height: 55,
-                      backgroundColor: statusColors[room.status] || '#fff',
+                      backgroundColor: ROOM_STATUS_COLORS[room.status] || '#fff',
                       border: '1px solid #d9d9d9',
                       borderRadius: 4,
                       display: 'flex',
@@ -191,7 +145,7 @@ const OfficeRooms = () => {
                       alignItems: 'center',
                       justifyContent: 'center',
                       cursor: 'pointer',
-                      color: statusTextColors[room.status] || '#000',
+                      color: ROOM_STATUS_TEXT_COLORS[room.status] || '#000',
                       fontSize: 11,
                     }}
                   >
@@ -308,8 +262,8 @@ const OfficeRooms = () => {
             <Descriptions.Item label="总价">¥{selectedRoom.totalPrice?.toLocaleString()}</Descriptions.Item>
             <Descriptions.Item label="朝向">{selectedRoom.direction || '-'}</Descriptions.Item>
             <Descriptions.Item label="状态" span={2}>
-              <Tag color={statusMap[selectedRoom.status]?.color}>
-                {statusMap[selectedRoom.status]?.text}
+              <Tag color={ROOM_STATUS_META[selectedRoom.status]?.color}>
+                {ROOM_STATUS_META[selectedRoom.status]?.text}
               </Tag>
             </Descriptions.Item>
           </Descriptions>

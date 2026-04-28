@@ -58,8 +58,8 @@ const EditCustomer = () => {
       const customer = res.data;
 
       // 处理区域数据（如果存储的是完整地址字符串）
-      let livingAreaValue = customer.livingArea;
-      let workAreaValue = customer.workArea;
+      const livingAreaValue = customer.livingArea;
+      const workAreaValue = customer.workArea;
 
       // 尝试解析 livingArea
       if (customer.livingArea) {

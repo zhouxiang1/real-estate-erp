@@ -333,34 +333,44 @@ export class DistributorService {
   // ==================== 经纪人统计 ====================
 
   async getDistributorStats(distributorId: string) {
-    const [commissions, withdrawals, recommendedCustomers, teamCount] = await Promise.all([
-      this.prisma.commission.findMany({
+    const [
+      totalCommissionAgg,
+      paidCommissionAgg,
+      pendingCommissionAgg,
+      pendingWithdrawalAgg,
+      recommendedCount,
+      dealCount,
+      teamCount,
+    ] = await Promise.all([
+      this.prisma.commission.aggregate({
         where: { distributorId },
+        _sum: { amount: true },
       }),
-      this.prisma.withdrawal.findMany({
+      this.prisma.commission.aggregate({
+        where: { distributorId, status: 2 },
+        _sum: { amount: true },
+      }),
+      this.prisma.commission.aggregate({
         where: { distributorId, status: { in: [0, 1] } },
+        _sum: { amount: true },
       }),
-      this.prisma.recommendedCustomer.findMany({
-        where: { distributorId },
+      this.prisma.withdrawal.aggregate({
+        where: { distributorId, status: 0 },
+        _sum: { amount: true },
+      }),
+      this.prisma.recommendedCustomer.count({ where: { distributorId } }),
+      this.prisma.recommendedCustomer.count({
+        where: { distributorId, status: 2 },
       }),
       this.prisma.distributor.count({
         where: { parentId: distributorId },
       }),
     ]);
 
-    const totalCommission = commissions.reduce((sum, c) => sum + c.amount, 0);
-    const paidCommission = commissions
-      .filter((c) => c.status === 2)
-      .reduce((sum, c) => sum + c.amount, 0);
-    const pendingCommission = commissions
-      .filter((c) => c.status === 0 || c.status === 1)
-      .reduce((sum, c) => sum + c.amount, 0);
-
-    const pendingWithdrawal = withdrawals
-      .filter((w) => w.status === 0)
-      .reduce((sum, w) => sum + w.amount, 0);
-
-    const dealCount = recommendedCustomers.filter((r) => r.status === 2).length;
+    const totalCommission = totalCommissionAgg._sum.amount || 0;
+    const paidCommission = paidCommissionAgg._sum.amount || 0;
+    const pendingCommission = pendingCommissionAgg._sum.amount || 0;
+    const pendingWithdrawal = pendingWithdrawalAgg._sum.amount || 0;
 
     return {
       totalCommission,
@@ -368,7 +378,7 @@ export class DistributorService {
       pendingCommission,
       availableCommission: pendingCommission - pendingWithdrawal,
       pendingWithdrawal,
-      recommendedCount: recommendedCustomers.length,
+      recommendedCount,
       dealCount,
       teamCount,
     };

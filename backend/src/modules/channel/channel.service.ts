@@ -110,23 +110,30 @@ export class ChannelService {
   // ==================== 渠道统计 ====================
 
   async getPartnerStats(id: string) {
-    const [transactions, commissions] = await Promise.all([
-      this.prisma.transaction.findMany({
+    const [transactionCount, transactionAmount, commissionAmount, paidCommissionAmount] = await Promise.all([
+      this.prisma.transaction.count({
         where: { channelPartnerId: id, status: { not: 2 } },
       }),
-      this.prisma.commission.findMany({
+      this.prisma.transaction.aggregate({
+        where: { channelPartnerId: id, status: { not: 2 } },
+        _sum: { totalPrice: true },
+      }),
+      this.prisma.commission.aggregate({
         where: { channelPartnerId: id },
+        _sum: { amount: true },
+      }),
+      this.prisma.commission.aggregate({
+        where: { channelPartnerId: id, status: 2 },
+        _sum: { amount: true },
       }),
     ]);
 
-    const totalAmount = transactions.reduce((sum, t) => sum + t.totalPrice, 0);
-    const totalCommission = commissions.reduce((sum, c) => sum + c.amount, 0);
-    const paidCommission = commissions
-      .filter((c) => c.status === 2)
-      .reduce((sum, c) => sum + c.amount, 0);
+    const totalAmount = transactionAmount._sum.totalPrice || 0;
+    const totalCommission = commissionAmount._sum.amount || 0;
+    const paidCommission = paidCommissionAmount._sum.amount || 0;
 
     return {
-      transactionCount: transactions.length,
+      transactionCount,
       totalAmount,
       totalCommission,
       paidCommission,
@@ -175,25 +182,41 @@ export class ChannelService {
       orderBy: { signDate: 'desc' },
     });
 
-    // 查询所有佣金
     const transactionIds = transactions.map((t) => t.id);
-    const allCommissions = await this.prisma.commission.findMany({
-      where: { transactionId: { in: transactionIds } },
-    });
+    const allCommissions = transactionIds.length
+      ? await this.prisma.commission.findMany({
+          where: { transactionId: { in: transactionIds } },
+        })
+      : [];
+    const commissionByTransactionId = new Map<string, (typeof allCommissions)[number]>();
+    for (const commission of allCommissions) {
+      const existing = commissionByTransactionId.get(commission.transactionId);
+      if (!existing || commission.rate > existing.rate) {
+        commissionByTransactionId.set(commission.transactionId, commission);
+      }
+    }
 
     // 异常检测规则
     const anomalies: any[] = [];
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const recentDealCountByCustomer = new Map<string, number>();
+
+    for (const tx of transactions) {
+      if (new Date(tx.signDate) <= thirtyDaysAgo) continue;
+      recentDealCountByCustomer.set(
+        tx.customerId,
+        (recentDealCountByCustomer.get(tx.customerId) || 0) + 1,
+      );
+    }
 
     for (const tx of transactions) {
       // 1. 同一客户短期内多次成交
-      const sameCustomerCount = transactions.filter(
-        (t) =>
-          t.customerId === tx.customerId &&
-          t.id !== tx.id &&
-          new Date(t.signDate) > thirtyDaysAgo,
-      ).length;
+      const isCurrentTransactionRecent = new Date(tx.signDate) > thirtyDaysAgo;
+      const sameCustomerCount = Math.max(
+        (recentDealCountByCustomer.get(tx.customerId) || 0) - (isCurrentTransactionRecent ? 1 : 0),
+        0,
+      );
 
       if (sameCustomerCount > 0) {
         anomalies.push({
@@ -230,7 +253,7 @@ export class ChannelService {
 
       // 3. 渠道/分销佣金比例异常高
       if (tx.channelPartnerId || tx.distributorId) {
-        const commission = allCommissions.find((c) => c.transactionId === tx.id);
+        const commission = commissionByTransactionId.get(tx.id);
         if (commission && commission.rate > 0.1) {
           anomalies.push({
             type: 'high_commission',

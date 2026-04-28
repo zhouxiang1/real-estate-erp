@@ -1114,7 +1114,6 @@ export class FinanceService {
       include: {
         customer: true,
         salesPerson: { select: { id: true, name: true } },
-        paymentRecords: { where: { status: 1 } },
         room: {
           include: {
             building: {
@@ -1130,7 +1129,7 @@ export class FinanceService {
 
     const data = transactions
       .map((tx) => {
-        const paidAmount = tx.paymentRecords.reduce((sum, item) => sum + item.amount, 0);
+        const paidAmount = tx.paidAmount || 0;
         const unpaidAmount = Math.max(0, tx.totalPrice - paidAmount);
         const aging = this.getAgingInfo(tx.signDate, unpaidAmount);
         const txInfo = this.getTransactionInfo(tx);

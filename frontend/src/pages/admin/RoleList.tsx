@@ -44,7 +44,9 @@ const RoleList = () => {
     let perms: string[] = [];
     try {
       perms = JSON.parse(record.permissions || '[]');
-    } catch (e) {}
+    } catch {
+      perms = [];
+    }
     setSelectedPermissions(perms);
     form.setFieldsValue({
       name: record.name,
